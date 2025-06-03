@@ -1,5 +1,3 @@
-# Simulation_Drone_Warehouse
- 
 
 # README.md
 
@@ -121,9 +119,9 @@ warehouse_drone_ws/
      ```
    - _Or_, if they’re hosted in Git repositories:
      ```bash
-     git clone <URL-to-sjtu_drone_bringup>       sjtu_drone_bringup
-     git clone <URL-to-bcr_bot-ros2>             bcr_bot
-     git clone <URL-to-sjtu_drone_control>       sjtu_drone_control
+     git clone https://github.com/Phetzxc/Simulation_Drone_Warehouse.git       sjtu_drone_bringup
+     git clone https://github.com/Phetzxc/Simulation_Drone_Warehouse.git             bcr_bot
+     git clone https://github.com/Phetzxc/Simulation_Drone_Warehouse.git       sjtu_drone_control
      ```
 
 3. **Build the workspace**:
@@ -298,4 +296,3 @@ ros2 run sjtu_drone_control land_drone_after_finish
 - Tune PID gains in `drone_auto_mode.py` & `land_drone_after_finish.py` to match your drone dynamics.
 - Always Ctrl+C **aruco_full_pipeline.py** _after_ scanning **all racks** → it writes the needed YAML files.
 
- 
