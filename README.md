@@ -119,9 +119,7 @@ warehouse_drone_ws/
      ```
    - _Or_, if they’re hosted in Git repositories:
      ```bash
-     git clone https://github.com/Phetzxc/Simulation_Drone_Warehouse.git       sjtu_drone_bringup
-     git clone https://github.com/Phetzxc/Simulation_Drone_Warehouse.git             bcr_bot
-     git clone https://github.com/Phetzxc/Simulation_Drone_Warehouse.git       sjtu_drone_control
+     git clone https://github.com/Phetzxc/Simulation_Drone_Warehouse.git
      ```
 
 3. **Build the workspace**:
