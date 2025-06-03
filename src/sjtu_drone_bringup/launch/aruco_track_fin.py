@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Image
+from geometry_msgs.msg import Pose2D
+from cv_bridge import CvBridge
+import cv2
+import numpy as np
+import tkinter as tk
+from PIL import Image as PILImage, ImageTk
+from geometry_msgs.msg import Pose, PoseStamped
+from tf_transformations import quaternion_from_euler  # เพิ่มบนสุด
+
+import math
+
+class ArucoTkinterNode(Node):
+    def __init__(self):
+        super().__init__('aruco_track')
+
+        # --- Parameters ---
+        self.declare_parameter('marker_size', 0.08)  # default marker size 8 cm
+        self.marker_size = self.get_parameter('marker_size').value
+
+        # --- Camera Parameters (for 1920x1080, HFOV 2.09 rad) ---
+        width, height = 640, 360
+        hfov_rad = 2.09
+        fx = fy = (width / 2) / math.tan(hfov_rad / 2)
+        cx, cy = width / 2, height / 2
+
+        self.camera_matrix = np.array([
+            [fx,  0, cx],
+            [ 0, fy, cy],
+            [ 0,  0,  1]
+        ], dtype=np.float32)
+        self.dist_coeffs = np.zeros((5, 1), dtype=np.float32)
+
+        self.T_cam_to_base = np.array([
+            [-1, 0, 0, -0.09],
+            [0, -1, 0,  0.00],
+            [0,  0, 1,  0.10],
+            [0,  0, 0,  1.0]
+        ], dtype=np.float32)
+
+        self.bridge = CvBridge()
+        self.image_sub = self.create_subscription(Image, '/simple_drone/front/image_raw', self.image_callback, 10)
+        self.pose_pub = self.create_publisher(PoseStamped, '/base_to_aruco', 10)
+
+        
+        self.gt_pose_sub = self.create_subscription(Pose, '/simple_drone/gt_pose', self.gt_pose_callback, 10)
+        self.drone_position_world = np.array([0.0, 0.0, 0.0])  # default
+
+        self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_1000)
+        parameters = cv2.aruco.DetectorParameters()
+        parameters.adaptiveThreshWinSizeMin = 3
+        parameters.adaptiveThreshWinSizeMax = 23
+        parameters.adaptiveThreshWinSizeStep = 10
+        parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+        parameters.adaptiveThreshConstant = 7
+        parameters.minMarkerPerimeterRate = 0.03
+        parameters.maxMarkerPerimeterRate = 4.0
+        self.detector = cv2.aruco.ArucoDetector(self.aruco_dict, parameters)
+
+        # GUI
+        self.window = tk.Tk()
+        self.window.title("Real-time ArUco Detection")
+        self.label = tk.Label(self.window)
+        self.label.pack()
+
+        self.get_logger().info(f"Aruco Detector Started | marker_size = {self.marker_size}")
+
+    def gt_pose_callback(self, msg):
+        self.drone_position_world = np.array([
+            msg.position.x,
+            msg.position.y,
+            msg.position.z
+        ])
+
+    def image_callback(self, msg):
+        frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        corners, ids, _ = self.detector.detectMarkers(frame)
+
+        if ids is not None:
+            cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+            rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, self.marker_size, self.camera_matrix, self.dist_coeffs)
+
+            for i, marker_id in enumerate(ids):
+                rvec = rvecs[i][0]
+                tvec = tvecs[i][0]
+
+                R_cam_to_marker, _ = cv2.Rodrigues(rvec)
+                T_cam_to_marker = np.eye(4)
+                T_cam_to_marker[:3, :3] = R_cam_to_marker
+                T_cam_to_marker[:3, 3] = tvec
+
+                T_base_to_marker = self.T_cam_to_base @ T_cam_to_marker
+                x_bf, y_bf, z_bf = T_base_to_marker[:3, 3]
+                y_bf = -y_bf
+                R_base_marker = T_base_to_marker[:3, :3]
+                yaw = np.arctan2(R_base_marker[1, 0], R_base_marker[0, 0])
+                pitch = np.arctan2(-R_base_marker[2, 0], np.sqrt(R_base_marker[2, 1]**2 + R_base_marker[2, 2]**2))
+                roll = np.arctan2(R_base_marker[2, 1], R_base_marker[2, 2])
+
+                cv2.drawFrameAxes(frame, self.camera_matrix, self.dist_coeffs, rvec, tvec, self.marker_size / 2)
+                
+                text = [
+                    f"ID: {marker_id[0]}",
+                    f"Forward/Back (X): {-((1.0*z_bf)-self.drone_position_world[0]):.2f} m",
+                    f"Left/Right  (Y): {-((1.0*x_bf)-self.drone_position_world[1]):.2f} m",
+                    f"Height (Z):       {-((1.0*y_bf)-self.drone_position_world[2]):.2f} m",
+                    f"Yaw: {pitch:.3f} rad",
+                    f"Pitch: {yaw:.3f} rad",
+                    f"Roll: {roll:.3f} rad"
+                ]
+
+                for j, line in enumerate(text):
+                    cv2.putText(frame, line, (20, 30 + j * 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+                
+                # สร้าง PoseStamped
+                pose_msg = PoseStamped()
+                pose_msg.header.stamp = self.get_clock().now().to_msg()
+                pose_msg.header.frame_id = str(marker_id[0])  # ใช้ frame_id เป็น ArUco ID
+
+                pose_msg.pose.position.x = -(z_bf - self.drone_position_world[0])  # Forward/Back
+                pose_msg.pose.position.y = -(x_bf - self.drone_position_world[1])  # Left/Right
+                pose_msg.pose.position.z = -(y_bf - self.drone_position_world[2])  # Height
+
+                # แปลง RPY เป็น quaternion
+                qx, qy, qz, qw = quaternion_from_euler(roll, pitch, yaw)
+
+                pose_msg.pose.orientation.x = qx
+                pose_msg.pose.orientation.y = qy
+                pose_msg.pose.orientation.z = qz
+                pose_msg.pose.orientation.w = qw
+
+                self.pose_pub.publish(pose_msg)
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        imgtk = ImageTk.PhotoImage(image=PILImage.fromarray(rgb))
+        self.label.imgtk = imgtk
+        self.label.configure(image=imgtk)
+        self.window.update_idletasks()
+        self.window.update()
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = ArucoTkinterNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        print("Shutting down gracefully...")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
