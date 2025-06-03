@@ -239,7 +239,7 @@ ros2 run sjtu_drone_control aruco_full_pipeline
 If you need a time‐parameterized file for `drone_auto_mode`, generate `gen_trajectory_output.yaml`:
 
 ```bash
-python3 generate_quintic_trajectory.py     --input config/aruco_gazebo/gen_path_modified.yaml     --output config/aruco_gazebo/gen_trajectory_output.yaml
+ros2 run sjtu_drone_control trajectory_gen
 ```
 
 ---
